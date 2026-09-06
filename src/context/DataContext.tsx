@@ -142,10 +142,34 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [products, setProducts] = useState<Product[]>(() => {
+    try {
+      const saved = localStorage.getItem('zentra_cached_products');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse cached products', e);
+    }
+    return [];
+  });
+
+  const [reviews, setReviews] = useState<ReviewItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('zentra_cached_reviews');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse cached reviews', e);
+    }
+    return [];
+  });
+
   const [categories, setCategories] = useState<Category[]>(BASE_CATEGORIES);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('zentra_cached_products');
+      if (saved && JSON.parse(saved).length > 0) return false;
+    } catch {}
+    return true;
+  });
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -289,6 +313,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setProducts(mappedProducts);
       setReviews(mappedReviews);
+      try {
+        localStorage.setItem('zentra_cached_products', JSON.stringify(mappedProducts));
+        localStorage.setItem('zentra_cached_reviews', JSON.stringify(mappedReviews));
+      } catch (e) {
+        console.warn('Failed to save to local cache', e);
+      }
       setCategories((prevCategories) =>
         prevCategories.map((cat) => {
           const count = mappedProducts.filter(

@@ -22,14 +22,13 @@ export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { addToCart, toggleWishlist, isWishlisted } = useCart();
-  const { products, getProductById } = useData();
+  const { products, getProductById, isLoading } = useData();
 
   const [isLoaded, setIsLoaded] = useState(false);
 
   const product =
     (id ? getProductById(id) : undefined) ||
-    products.find((p) => String(p.id).toLowerCase() === id?.toLowerCase()) ||
-    products[0];
+    products.find((p) => String(p.id).toLowerCase() === id?.toLowerCase());
 
   const [selectedImage, setSelectedImage] = useState(product?.image || '');
   const [selectedColor, setSelectedColor] = useState(
@@ -40,6 +39,21 @@ export const ProductDetail: React.FC = () => {
   const [isAdded, setIsAdded] = useState(false);
   const [currentRating, setCurrentRating] = useState(product?.rating || 4.9);
   const [currentReviewCount, setCurrentReviewCount] = useState(product?.reviewCount || 128);
+
+  // Sync state when product loads
+  useEffect(() => {
+    if (product) {
+      setSelectedImage(product.image || '');
+      setSelectedColor(
+        product.colors && product.colors.length > 0 ? product.colors[0].name : ''
+      );
+      setCurrentRating(product.rating || 4.9);
+      setCurrentReviewCount(product.reviewCount || 128);
+      setQuantity(1);
+      window.scrollTo(0, 0);
+      setIsLoaded(true);
+    }
+  }, [product?.id]);
 
   const handleRatingStatsChange = useCallback(
     ({ avgRating, totalReviews }: { avgRating: number; totalReviews: number }) => {
@@ -72,23 +86,24 @@ export const ProductDetail: React.FC = () => {
   }, [selectedColor, product?.image, activeVariant?.variantImage]);
   // -----------------------------
 
-  useEffect(() => {
-    if (product) {
-      setSelectedColor(
-        product.colors && product.colors.length > 0 ? product.colors[0].name : ''
-      );
-      setQuantity(1);
-      window.scrollTo(0, 0);
-      setIsLoaded(true);
-    }
-  }, [id, product]);
+  if (isLoading) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4 px-4">
+        <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
+        <p className="text-sm font-medium text-slate-500 animate-pulse">Loading product details...</p>
+      </div>
+    );
+  }
 
   if (!product) {
     return (
-      <div className="px-4 py-16 text-center space-y-4">
+      <div className="px-4 py-24 text-center space-y-4 max-w-md mx-auto">
+        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+          <ShoppingBag className="w-8 h-8" />
+        </div>
         <h2 className="text-xl font-bold text-slate-800">Product Not Found</h2>
         <p className="text-sm text-slate-500">
-          The requested appliance could not be found.
+          The requested appliance could not be found or may have been updated.
         </p>
         <button
           onClick={() => navigate('/shop')}
