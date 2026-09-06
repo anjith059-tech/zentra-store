@@ -1,0 +1,6 @@
+{
+  "name": "Zentra",
+  "description": "Mobile-first eCommerce store for Zentra premium smart home and kitchen appliances.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
