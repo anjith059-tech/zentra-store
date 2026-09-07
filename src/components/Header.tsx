@@ -62,8 +62,8 @@ export const Header: React.FC = () => {
           </button>
 
           {/* Center: Brand Logo */}
-          <Link to="/" className="absolute left-1/2 -translate-x-1/2 flex items-center active:scale-95 transition-transform">
-            <span className="text-xl font-bold tracking-[0.25em] uppercase">
+          <Link to="/" className="absolute left-1/2 -translate-x-1/2 flex items-center active:scale-95 transition-transform" aria-label="Zentra Home">
+            <span className="text-xl font-bold tracking-[0.25em] uppercase text-slate-900">
               ZENTRA
             </span>
           </Link>

@@ -10,7 +10,7 @@ export const Footer: React.FC = () => {
         <div className="flex flex-col items-center gap-3">
           <span className="text-xl font-bold tracking-[0.25em] uppercase text-white">ZENTRA</span>
           <p className="text-xs text-slate-400 font-light tracking-wide leading-relaxed max-w-sm mx-auto">
-            Premium home and kitchen appliances designed for comfort, convenience, and modern living.
+            Better Homes. Everyday. Premium appliances designed for comfort, convenience, and modern living.
           </p>
         </div>
 
