@@ -668,6 +668,7 @@ export const Checkout: React.FC = () => {
           </div>
         </motion.div>
 
+        {/* Section 4: Payment Method */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
