@@ -4,7 +4,11 @@ import { NavLink } from 'react-router-dom';
 import {
   X,
   Home,
+  ShoppingBag,
   Package,
+  Info,
+  Mail,
+  Shield,
 } from 'lucide-react';
 
 interface MobileDrawerProps {
@@ -76,6 +80,21 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ isOpen, onClose }) =
               </NavLink>
 
               <NavLink
+                to="/shop"
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-semibold transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <ShoppingBag className="w-4 h-4" />
+                Shop Products
+              </NavLink>
+
+              <NavLink
                 to="/orders"
                 onClick={onClose}
                 className={({ isActive }) =>
@@ -88,6 +107,51 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ isOpen, onClose }) =
               >
                 <Package className="w-4 h-4" />
                 My Orders
+              </NavLink>
+
+              <NavLink
+                to="/about"
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-semibold transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <Info className="w-4 h-4" />
+                About Us
+              </NavLink>
+
+              <NavLink
+                to="/contact"
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-semibold transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <Mail className="w-4 h-4" />
+                Contact
+              </NavLink>
+
+              <NavLink
+                to="/privacy"
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-semibold transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <Shield className="w-4 h-4" />
+                Privacy Policy
               </NavLink>
             </div>
           </div>

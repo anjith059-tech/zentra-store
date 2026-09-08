@@ -46,6 +46,9 @@ export const Footer: React.FC = () => {
             <Link to="/orders" className="hover:text-white transition-colors">
               My Orders
             </Link>
+            <Link to="/privacy" className="hover:text-white transition-colors">
+              Privacy Policy
+            </Link>
           </nav>
 
           <div className="flex items-center justify-center">

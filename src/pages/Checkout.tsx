@@ -332,22 +332,29 @@ export const Checkout: React.FC = () => {
     const derivedLastName = lastName || fullNameParts.slice(1).join(' ') || '';
     const fullPhoneNumber = `${countryCode.trim()} ${form.phone.trim()}`;
 
-    placeOrder({
-      ...form,
-      phone: fullPhoneNumber,
-      country,
-      firstName: derivedFirstName,
-      lastName: derivedLastName,
-      addressLine1: form.street,
-      addressLine2: apt,
-      zipCode: form.zip,
-    }, `Razorpay Payment (${paymentId})`);
-    
-    showToast('Payment successful! Your order has been placed.', 'success');
-    
-    setIsProcessing(false);
-    setShowRazorpayModal(false);
-    navigate('/order-success');
+    try {
+      await placeOrder({
+        ...form,
+        phone: fullPhoneNumber,
+        country,
+        firstName: derivedFirstName,
+        lastName: derivedLastName,
+        addressLine1: form.street,
+        addressLine2: apt,
+        zipCode: form.zip,
+      }, `Razorpay Payment (${paymentId})`);
+      
+      showToast('Payment successful! Your order has been placed.', 'success');
+      setIsProcessing(false);
+      setShowRazorpayModal(false);
+      navigate('/order-success');
+    } catch (orderErr) {
+      console.error('Error recording confirmed order:', orderErr);
+      setIsProcessing(false);
+      // Even if Google Sheets webhook takes longer than 30s, the payment was collected
+      // Navigate to order-success so user gets confirmation
+      navigate('/order-success');
+    }
   };
 
   const handleOpenPayment = async (e: React.FormEvent) => {
