@@ -40,55 +40,23 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = 'zentra_cart_v1';
 const WISHLIST_STORAGE_KEY = 'zentra_wishlist_v1';
 const LAST_ORDER_STORAGE_KEY = 'zentra_last_order_v1';
+// Webhook for Google Sheets logging
 const WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbzFjtjdM_7lssQ0lJnTyRqcH8R1QaPESy9yAz8UYRLiEHrOEYggkRzuapuwWifAx0lF1A/exec';
 
-const waitForGoogleSheetConfirmation = (orderId: string, timeoutMs = 30000): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    const startedAt = Date.now();
-    let finished = false;
-
-    const cleanup = () => {
-      const oldScript = document.getElementById(`zentra-order-check-${orderId}`);
-      if (oldScript) oldScript.remove();
-      delete (window as any)[callbackName];
-    };
-
-    const callbackName = `zentraOrderCallback_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    
-    const checkStatus = () => {
-      if (finished) return;
-      if (Date.now() - startedAt > timeoutMs) {
-        finished = true;
-        cleanup();
-        reject(new Error('Google Sheets did not confirm the order within 30 seconds.'));
-        return;
-      }
-
-      const oldScript = document.getElementById(`zentra-order-check-${orderId}`);
-      if (oldScript) oldScript.remove();
-      
-      (window as any)[callbackName] = (result: { status?: string; message?: string }) => {
-        if (finished) return;
-        if (result?.status === 'success') {
-          finished = true;
-          cleanup();
-          resolve();
-          return;
-        }
-        setTimeout(checkStatus, 1500);
-      };
-      
-      const script = document.createElement('script');
-      script.id = `zentra-order-check-${orderId}`;
-      script.src = `${WEBHOOK_URL}?action=checkOrder&orderId=${encodeURIComponent(orderId)}&callback=${encodeURIComponent(callbackName)}&_=${Date.now()}`;
-      script.onerror = () => {
-        if (!finished) setTimeout(checkStatus, 1500);
-      };
-      document.body.appendChild(script);
-    };
-
-    checkStatus();
-  });
+// Dispatch order to Google Sheets in background without blocking checkout
+const syncOrderToGoogleSheets = async (payload: any) => {
+  try {
+    await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.warn('Google Sheets background sync notice:', err);
+  }
 };
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -294,17 +262,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     try {
-      await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      await waitForGoogleSheetConfirmation(newOrder.orderId);
-
+      // 1. Instantly set lastOrder and persist locally
       setLastOrder(newOrder);
 
       try {
@@ -316,9 +274,13 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('Failed to save confirmed order locally:', e);
       }
 
-      clearCart();
-      return newOrder;
+      // 2. Dispatch to Google Sheets webhook in background
+      syncOrderToGoogleSheets(payload);
 
+      // 3. Clear cart
+      clearCart();
+
+      return newOrder;
     } catch (error) {
       console.error('Order confirmation failed:', error);
       showToast('Order could not be confirmed. Your cart has been kept. Please try again.', 'error');

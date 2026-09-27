@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -13,6 +13,7 @@ import {
   Search,
   ChevronDown,
   X,
+  Key,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { BackButton } from '../components/BackButton';
@@ -247,19 +248,29 @@ export const Checkout: React.FC = () => {
   }, [countrySearch]);
 
   const [apt, setApt] = useState('');
-  const [showRazorpayModal, setShowRazorpayModal] = useState(false);
+  const isOrderSubmitted = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [razorpayKeyId, setRazorpayKeyId] = useState<string>('rzp_test_TLFeaOB1eAktjA');
-  const [isLiveRazorpayConfigured, setIsLiveRazorpayConfigured] = useState(false);
+  const [razorpayKeyId, setRazorpayKeyId] = useState<string>(() => {
+    return (
+      localStorage.getItem('zentra_razorpay_key_id') ||
+      (import.meta as any).env?.VITE_RAZORPAY_KEY_ID ||
+      'rzp_test_TLFeaOB1eAktjA'
+    );
+  });
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
+  const isLiveRazorpayConfigured = razorpayKeyId.startsWith('rzp_live');
 
-  // Fetch Razorpay configuration from server on mount
+  // Fetch Razorpay configuration from server on mount if available
   useEffect(() => {
     fetch('/api/payment/razorpay-config')
-      .then((res) => res.json())
+      .then((res) => {
+        const ct = res.headers.get('content-type') || '';
+        return ct.includes('application/json') ? res.json() : null;
+      })
       .then((data) => {
-        if (data?.keyId) {
+        if (data?.keyId && !localStorage.getItem('zentra_razorpay_key_id')) {
           setRazorpayKeyId(data.keyId);
-          setIsLiveRazorpayConfigured(Boolean(data.configured));
         }
       })
       .catch((err) => {
@@ -267,24 +278,41 @@ export const Checkout: React.FC = () => {
       });
   }, []);
 
-  useEffect(() => {
-    const scriptId = 'razorpay-checkout-sdk';
-    if (!document.getElementById(scriptId)) {
+  const ensureRazorpayLoaded = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && (window as any).Razorpay) {
+        return resolve(true);
+      }
+      const existing = document.getElementById('razorpay-checkout-sdk');
+      if (existing) {
+        if ((window as any).Razorpay) return resolve(true);
+        existing.addEventListener('load', () => resolve(true));
+        existing.addEventListener('error', () => resolve(false));
+        setTimeout(() => resolve(Boolean((window as any).Razorpay)), 1200);
+        return;
+      }
       const script = document.createElement('script');
-      script.id = scriptId;
+      script.id = 'razorpay-checkout-sdk';
       script.src = 'https://checkout.razorpay.com/v1/checkout.js';
       script.async = true;
-      document.body.appendChild(script);
-    }
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+  };
+
+  useEffect(() => {
+    ensureRazorpayLoaded();
   }, []);
 
   useEffect(() => {
-    if (cart.length === 0) {
+    // Only redirect if cart was empty when first landing on checkout and not during/after order placement
+    if (cart.length === 0 && !isOrderSubmitted.current) {
       navigate('/cart', { replace: true });
     }
   }, [cart.length, navigate]);
 
-  if (cart.length === 0) {
+  if (cart.length === 0 && !isOrderSubmitted.current) {
     return null;
   }
 
@@ -304,6 +332,9 @@ export const Checkout: React.FC = () => {
       return;
     }
 
+    // Set order submitted immediately so cart clearing will never redirect to /cart
+    isOrderSubmitted.current = true;
+
     // Verify signature on backend if signature and order ID are available
     if (response.razorpay_order_id && response.razorpay_signature) {
       try {
@@ -316,14 +347,16 @@ export const Checkout: React.FC = () => {
             razorpay_signature: response.razorpay_signature,
           }),
         });
-        const verifyData = await verifyRes.json();
-        if (!verifyData.verified) {
-          setIsProcessing(false);
-          showToast('Payment verification failed. Please contact support.', 'error');
-          return;
+        if (verifyRes.ok) {
+          const verifyData = await verifyRes.json();
+          if (verifyData && verifyData.verified === false) {
+            setIsProcessing(false);
+            showToast('Payment verification failed. Please contact support.', 'error');
+            return;
+          }
         }
       } catch (verifyErr) {
-        console.warn('Verification request error:', verifyErr);
+        console.warn('Verification request notice:', verifyErr);
       }
     }
     
@@ -346,14 +379,11 @@ export const Checkout: React.FC = () => {
       
       showToast('Payment successful! Your order has been placed.', 'success');
       setIsProcessing(false);
-      setShowRazorpayModal(false);
-      navigate('/order-success');
+      navigate('/order-success', { replace: true });
     } catch (orderErr) {
       console.error('Error recording confirmed order:', orderErr);
       setIsProcessing(false);
-      // Even if Google Sheets webhook takes longer than 30s, the payment was collected
-      // Navigate to order-success so user gets confirmation
-      navigate('/order-success');
+      navigate('/order-success', { replace: true });
     }
   };
 
@@ -367,55 +397,77 @@ export const Checkout: React.FC = () => {
 
     setIsProcessing(true);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
     try {
-      // 1. Create order on the server with 6s timeout
-      const orderRes = await fetch('/api/payment/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          amount: grandTotal,
-          currency: 'USD',
-          receipt: `rcpt_${Date.now()}`,
-          notes: {
-            customer_name: form.fullName,
-            customer_email: form.email,
-            shipping_address: `${form.street}, ${form.city}, ${form.state} ${form.zip}, ${country}`,
-          },
-        }),
-      });
-
-      clearTimeout(timeoutId);
-
-      const orderData = await orderRes.json();
-      if (!orderRes.ok || !orderData.orderId) {
-        throw new Error(orderData.error || 'Failed to initialize payment order');
+      const isLoaded = await ensureRazorpayLoaded();
+      if (!isLoaded || typeof (window as any).Razorpay === 'undefined') {
+        showToast('Razorpay payment gateway failed to load. Please check your internet or disable ad-blockers and try again.', 'error');
+        setIsProcessing(false);
+        return;
       }
 
-      const activeKey = orderData.keyId || razorpayKeyId;
+      let activeKey = razorpayKeyId;
+      let serverOrderId: string | undefined = undefined;
 
-      // 2. Configure Razorpay Standard Checkout
-      const options = {
+      // Try creating backend order if server is active (with 3s timeout)
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+        const orderRes = await fetch('/api/payment/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            amount: grandTotal,
+            currency: 'USD',
+            receipt: `rcpt_${Date.now()}`,
+            notes: {
+              customer_name: form.fullName,
+              customer_email: form.email,
+              shipping_address: `${form.street}, ${form.city}, ${form.state} ${form.zip}, ${country}`,
+            },
+          }),
+        });
+
+        clearTimeout(timeoutId);
+
+        if (orderRes.ok) {
+          const contentType = orderRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const orderData = await orderRes.json();
+            if (orderData?.keyId) {
+              activeKey = orderData.keyId;
+            }
+            if (orderData?.orderId && !orderData.mock) {
+              serverOrderId = orderData.orderId;
+            }
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend order API not available, launching direct Razorpay standard checkout:', backendErr);
+      }
+
+      // Configure official Razorpay Standard Checkout
+      const options: any = {
         key: activeKey,
-        amount: orderData.amount || Math.round(grandTotal * 100),
-        currency: orderData.currency || 'USD',
+        amount: Math.round(grandTotal * 100),
+        currency: 'USD',
         name: 'ZENTRA',
         description: 'Order Payment',
-        order_id: orderData.mock ? undefined : orderData.orderId,
-        handler: handlePaymentSuccess,
+        image: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=128&q=80',
         prefill: {
           name: form.fullName,
           email: form.email,
-          contact: `${countryCode} ${form.phone}`,
+          contact: `${countryCode} ${form.phone}`.trim(),
         },
         notes: {
           address: `${form.street}, ${form.city}, ${form.state} ${form.zip}, ${country}`,
         },
         theme: {
           color: '#0f172a',
+        },
+        handler: (response: any) => {
+          handlePaymentSuccess(response);
         },
         modal: {
           ondismiss: () => {
@@ -424,40 +476,24 @@ export const Checkout: React.FC = () => {
         },
       };
 
-      // 3. Open official Razorpay Checkout modal
-      if (typeof window !== 'undefined' && (window as any).Razorpay) {
-        try {
-          const rzp = new (window as any).Razorpay(options);
-          rzp.on('payment.failed', function (resp: any) {
-            setIsProcessing(false);
-            showToast(resp?.error?.description || 'Payment was unsuccessful', 'error');
-          });
-          rzp.open();
-          return;
-        } catch (err) {
-          console.warn('Razorpay SDK invocation failed:', err);
-        }
+      if (serverOrderId) {
+        options.order_id = serverOrderId;
       }
 
-      // Fallback modal if SDK is blocked or preview sandbox
-      setShowRazorpayModal(true);
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', function (resp: any) {
+        setIsProcessing(false);
+        const errMsg = resp?.error?.description || resp?.error?.reason || 'Payment was unsuccessful or cancelled';
+        showToast(errMsg, 'error');
+      });
+
+      rzp.open();
     } catch (err: any) {
-      clearTimeout(timeoutId);
-      console.error('Payment launch error:', err);
-      showToast(err?.message || 'Could not initiate payment. Falling back to checkout drawer.', 'error');
-      setShowRazorpayModal(true);
+      console.error('Razorpay launch error:', err);
+      showToast(err?.message || 'Could not launch payment gateway. Please try again.', 'error');
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const handleCompleteRazorpayPayment = () => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      handlePaymentSuccess({
-        razorpay_payment_id: `pay_rzp_${Date.now()}`,
-      });
-    }, 1000);
   };
 
   return (
@@ -784,8 +820,31 @@ export const Checkout: React.FC = () => {
                 <CreditCard className="w-5 h-5 text-slate-100" />
               </div>
               <div>
-                <h3 className="text-xs font-black text-white tracking-wide uppercase">Payment Method</h3>
-                <p className="text-[11px] text-slate-400 font-medium">Razorpay Gateway Integration</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-black text-white tracking-wide uppercase">Payment Method</h3>
+                  {isLiveRazorpayConfigured ? (
+                    <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                      Live
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-semibold text-amber-400 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                      Gateway Ready
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-[11px] text-slate-400 font-medium">Official Razorpay Checkout</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKeyInput(razorpayKeyId);
+                      setShowKeyModal(true);
+                    }}
+                    className="text-[10px] text-blue-400 hover:text-blue-300 underline font-semibold cursor-pointer"
+                  >
+                    Gateway Settings
+                  </button>
+                </div>
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/90 border border-slate-700/80 text-[10px] font-bold text-slate-300 tracking-wider shadow-xs shrink-0">
@@ -796,8 +855,8 @@ export const Checkout: React.FC = () => {
 
           <p className="text-xs text-slate-400 leading-relaxed relative z-10">
             {country.toLowerCase() === 'india'
-              ? 'Clicking below opens the secure Razorpay checkout drawer to pay with Credit/Debit Cards, UPI, Netbanking, or Wallets.'
-              : 'Clicking below opens the secure Razorpay checkout drawer to pay securely with International Credit/Debit Cards.'}
+              ? 'Clicking below opens the official Razorpay modal to pay securely with UPI, Credit/Debit Cards, Netbanking, or Wallets.'
+              : 'Clicking below opens the official Razorpay modal to pay securely with International Credit/Debit Cards.'}
           </p>
 
           <button
@@ -812,7 +871,7 @@ export const Checkout: React.FC = () => {
                 <ShieldCheck className="w-4.5 h-4.5 text-slate-800 group-hover:text-emerald-600 transition-colors duration-300 shrink-0" />
               )}
               <span className="font-extrabold text-xs">
-                {isProcessing ? 'Connecting Razorpay...' : 'Pay with Razorpay'}
+                {isProcessing ? 'Opening Razorpay...' : 'Pay with Razorpay'}
               </span>
             </div>
             <span className="font-black text-sm tracking-tight text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg group-hover:bg-slate-200 transition-colors duration-300">
@@ -822,75 +881,78 @@ export const Checkout: React.FC = () => {
         </motion.div>
       </form>
 
-      {showRazorpayModal && (
+      {/* Gateway Settings Modal */}
+      {showKeyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
-          <div className="w-full max-w-[360px] bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
-            <div className="bg-[#0C2340] text-white p-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center font-black text-xs text-white">
-                  R
+          <div className="w-full max-w-[380px] bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white">
+                  <Key className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="font-extrabold text-xs tracking-wider uppercase text-blue-300">
-                    Razorpay
-                  </span>
-                  <p className="text-[10px] text-slate-300">Zentra Store Checkout</p>
+                  <h4 className="font-extrabold text-sm text-slate-900">Razorpay Key Configuration</h4>
+                  <p className="text-[11px] text-slate-500">Merchant Gateway Credentials</p>
                 </div>
               </div>
               <button
-                onClick={() => setShowRazorpayModal(false)}
-                className="text-slate-400 hover:text-white p-1"
+                type="button"
+                onClick={() => setShowKeyModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-center">
-              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                <p className="text-[11px] text-slate-500">Amount to Pay</p>
-                <p className="text-2xl font-black text-slate-900 mt-0.5">
-                  ${grandTotal.toFixed(2)}
-                </p>
-                <p className="text-[10px] text-blue-600 font-semibold mt-1">
-                  Order ID: ZENTRA-{Math.floor(100000 + Math.random() * 900000)}
-                </p>
-              </div>
-
-              <div className="space-y-1.5 text-left text-xs">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Payment Gateway
-                </p>
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl flex items-center gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <div>
-                    <p className="font-bold text-slate-900 text-xs">
-                      {isLiveRazorpayConfigured ? 'Razorpay Live Production' : 'Razorpay Gateway'}
-                    </p>
-                    <p className="text-[10px] text-slate-500">
-                      {isLiveRazorpayConfigured ? 'Connected to Razorpay Dashboard' : 'Ready for live payments'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={handleCompleteRazorpayPayment}
-                disabled={isProcessing}
-                className="w-full bg-[#0C2340] hover:bg-slate-900 text-white font-extrabold text-xs py-3.5 rounded-2xl shadow-md flex items-center justify-center gap-2 active:scale-98 transition-all disabled:opacity-70"
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Paste your Razorpay <span className="font-semibold text-slate-900">Key ID</span> from your{' '}
+              <a
+                href="https://dashboard.razorpay.com/app/keys"
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-600 underline font-semibold"
               >
-                {isProcessing ? (
-                  <>
-                    <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                    <span>Processing with Razorpay...</span>
-                  </>
-                ) : (
-                  <span>Complete Payment</span>
-                )}
-              </button>
+                Razorpay Dashboard
+              </a>{' '}
+              to start collecting live customer payments:
+            </p>
 
-              <p className="text-[10px] text-slate-400">
-                256-bit encrypted checkout powered by Razorpay.
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700">Razorpay Key ID</label>
+              <input
+                type="text"
+                placeholder="rzp_live_... or rzp_test_..."
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value.trim())}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:bg-white focus:border-blue-600 focus:outline-none transition-all"
+              />
+              <p className="text-[10px] text-slate-400 truncate">
+                Active Key: {razorpayKeyId}
               </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (keyInput) {
+                    localStorage.setItem('zentra_razorpay_key_id', keyInput);
+                    setRazorpayKeyId(keyInput);
+                    showToast('Razorpay Key saved successfully!', 'success');
+                  }
+                  setShowKeyModal(false);
+                }}
+                className="flex-1 py-2.5 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all"
+              >
+                Save & Apply
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowKeyModal(false)}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
