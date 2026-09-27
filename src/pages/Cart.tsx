@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, ShieldCheck } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { BackButton } from '../components/BackButton';
 import { formatImageUrl, handleImageError } from '../utils/imageUtils';
+import { AuthModal } from '../components/AuthModal';
 
 export const Cart: React.FC = () => {
   const navigate = useNavigate();
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const {
     cart,
     updateQuantity,
@@ -17,6 +19,15 @@ export const Cart: React.FC = () => {
     discountAmount,
     grandTotal,
   } = useCart();
+
+  const handleProceedToCheckout = () => {
+    const userEmail = localStorage.getItem('zentra_user_email');
+    if (!userEmail) {
+      setShowAuthModal(true);
+      return;
+    }
+    navigate('/checkout');
+  };
 
   if (cart.length === 0) {
     return (
@@ -140,8 +151,8 @@ export const Cart: React.FC = () => {
           <span className="text-xl font-black text-slate-900">${grandTotal.toFixed(2)}</span>
         </div>
         <button
-          onClick={() => navigate('/checkout')}
-          className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black text-white py-3.5 rounded-2xl text-xs font-bold shadow-md active:scale-98 transition-all mt-4"
+          onClick={handleProceedToCheckout}
+          className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black text-white py-3.5 rounded-2xl text-xs font-bold shadow-md active:scale-98 transition-all mt-4 cursor-pointer"
         >
           <span>Proceed to Checkout</span>
           <ArrowRight className="w-4 h-4" />
@@ -152,6 +163,17 @@ export const Cart: React.FC = () => {
         <ShieldCheck className="w-4 h-4 text-blue-600" />
         <span>Encrypted 256-Bit Secure Checkout</span>
       </div>
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={() => {
+          setShowAuthModal(false);
+          navigate('/checkout');
+        }}
+        title="Sign In to Checkout"
+        subtitle="Please sign in or create an account to proceed to checkout."
+      />
     </div>
   );
 };
