@@ -248,39 +248,13 @@ export const Checkout: React.FC = () => {
   const [apt, setApt] = useState('');
   const isOrderSubmitted = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentCurrency, setPaymentCurrency] = useState<'USD' | 'INR'>(() => {
-    return localStorage.getItem('zentra_currency') === 'INR' ? 'INR' : 'USD';
-  });
-
-  const inrRate = 85;
-  const displayGrandTotalINR = Math.round(grandTotal * inrRate);
-  const activePaymentAmount = paymentCurrency === 'INR' ? displayGrandTotalINR : grandTotal;
-  const activeRazorpayAmount = Math.round(activePaymentAmount * 100);
 
   const [razorpayKeyId, setRazorpayKeyId] = useState<string>(() => {
-    const saved = localStorage.getItem('zentra_razorpay_key_id');
-    if (saved && !saved.startsWith('rzp_test_')) {
-      return saved;
-    }
-    // Update local storage to ensure live key is preserved
-    localStorage.setItem('zentra_razorpay_key_id', 'rzp_live_TZZlF4VIFX065X');
     return (
       (import.meta as any).env?.VITE_RAZORPAY_KEY_ID ||
       'rzp_live_TZZlF4VIFX065X'
     );
   });
-
-  // Auto-switch currency to INR if country is India or phone is Indian (+91)
-  useEffect(() => {
-    if (
-      country.toLowerCase() === 'india' ||
-      countryCode.trim() === '+91'
-    ) {
-      if (!localStorage.getItem('zentra_currency')) {
-        setPaymentCurrency('INR');
-      }
-    }
-  }, [country, countryCode]);
 
   // Fetch Razorpay configuration from server on mount if available
   useEffect(() => {
@@ -408,7 +382,7 @@ export const Checkout: React.FC = () => {
         addressLine1: form.street,
         addressLine2: apt,
         zipCode: form.zip,
-      }, `Razorpay ${paymentCurrency} Payment (${paymentId})`);
+      }, `Razorpay Payment (${paymentId})`);
       
       showToast('Payment successful! Your order has been placed.', 'success');
       setIsProcessing(false);
@@ -441,6 +415,11 @@ export const Checkout: React.FC = () => {
       let activeKey = razorpayKeyId;
       let serverOrderId: string | undefined = undefined;
 
+      const isIndianCustomer = country.toLowerCase() === 'india' || countryCode.trim() === '+91';
+      const orderCurrency = isIndianCustomer ? 'INR' : 'USD';
+      const orderAmount = isIndianCustomer ? Math.round(grandTotal * 85) : grandTotal;
+      const amountInSmallestUnit = Math.round(orderAmount * 100);
+
       // Try creating backend order if server is active (with 3s timeout)
       try {
         const controller = new AbortController();
@@ -451,8 +430,8 @@ export const Checkout: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
-            amount: activePaymentAmount,
-            currency: paymentCurrency,
+            amount: orderAmount,
+            currency: orderCurrency,
             receipt: `rcpt_${Date.now()}`,
             keyId: activeKey,
             notes: {
@@ -487,10 +466,10 @@ export const Checkout: React.FC = () => {
       // Configure official Razorpay Standard Checkout
       const options: any = {
         key: activeKey,
-        amount: activeRazorpayAmount,
-        currency: paymentCurrency,
+        amount: amountInSmallestUnit,
+        currency: orderCurrency,
         name: 'ZENTRA',
-        description: `Order Payment (${paymentCurrency === 'INR' ? `₹${displayGrandTotalINR.toLocaleString('en-IN')}` : `$${grandTotal.toFixed(2)}`})`,
+        description: 'Order Payment',
         image: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=128&q=80',
         prefill: {
           name: form.fullName,
@@ -499,7 +478,7 @@ export const Checkout: React.FC = () => {
         },
         notes: {
           address: `${form.street}, ${form.city}, ${form.state} ${form.zip}, ${country}`,
-          currency: paymentCurrency,
+          currency: orderCurrency,
         },
         theme: {
           color: '#0f172a',
