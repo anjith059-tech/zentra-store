@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Package, ShoppingBag, MapPin, Calendar, ArrowRight, CreditCard, Lock, LogIn, Trash2 } from 'lucide-react';
+import { Package, ShoppingBag, MapPin, Calendar, ArrowRight, CreditCard, Lock, LogIn } from 'lucide-react';
 import { Order } from '../types';
 import { BackButton } from '../components/BackButton';
 
@@ -13,21 +13,12 @@ export const Orders: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Filter local orders strictly by user email
-  const loadLocalOrdersForUser = useCallback((userEmail: string | null): Order[] => {
-    if (!userEmail) return [];
+  // Clear any old fake test orders from local storage on mount
+  useEffect(() => {
     try {
-      const rawList = localStorage.getItem('zentra_orders_list_v1');
-      const loaded: Order[] = rawList ? JSON.parse(rawList) : [];
-      if (!Array.isArray(loaded)) return [];
-
-      const cleanUserEmail = userEmail.trim().toLowerCase();
-      return loaded.filter((order) => {
-        const orderEmail = order.customer?.email || (order as any).email;
-        return orderEmail && orderEmail.trim().toLowerCase() === cleanUserEmail;
-      });
+      localStorage.removeItem('zentra_orders_list_v1');
     } catch {
-      return [];
+      // ignore
     }
   }, []);
 
@@ -57,54 +48,40 @@ export const Orders: React.FC = () => {
       return;
     }
 
-    const initialLocalOrders = loadLocalOrdersForUser(currentUserEmail);
-    if (initialLocalOrders.length > 0) {
-      setOrders(initialLocalOrders);
-      setLoading(false);
-    } else {
-      setLoading(true);
-    }
+    setLoading(true);
 
     const fetchOrders = async () => {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
-        const response = await fetch(`${WEBHOOK_URL}?email=${encodeURIComponent(currentUserEmail)}`, {
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const response = await fetch(`${WEBHOOK_URL}?email=${encodeURIComponent(currentUserEmail.trim().toLowerCase())}`, {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
 
         const data = await response.json();
         
-        if (data.status === 'success' && Array.isArray(data.orders) && data.orders.length > 0) {
-          const serverOrders: Order[] = data.orders;
-          const localOrders = loadLocalOrdersForUser(currentUserEmail);
-          
-          // Merge and deduplicate by orderId
-          const orderMap = new Map<string, Order>();
-          serverOrders.forEach((o) => {
-            if (o.orderId) orderMap.set(o.orderId, o);
+        if (data.status === 'success' && Array.isArray(data.orders)) {
+          // Strictly filter by customer email to guarantee only real orders for this specific logged-in user
+          const cleanUserEmail = currentUserEmail.trim().toLowerCase();
+          const verifiedOrders = data.orders.filter((o: Order) => {
+            const orderEmail = o.customer?.email || (o as any).email || (o as any).emailAddress;
+            return !orderEmail || orderEmail.trim().toLowerCase() === cleanUserEmail;
           });
-          localOrders.forEach((o) => {
-            if (o.orderId && !orderMap.has(o.orderId)) {
-              orderMap.set(o.orderId, o);
-            }
-          });
-
-          setOrders(Array.from(orderMap.values()));
+          setOrders(verifiedOrders);
         } else {
-          setOrders(loadLocalOrdersForUser(currentUserEmail));
+          setOrders([]);
         }
       } catch (e) {
         console.warn('Network sync notice for orders:', e);
-        setOrders(loadLocalOrdersForUser(currentUserEmail));
+        setOrders([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchOrders();
-  }, [currentUserEmail, loadLocalOrdersForUser]);
+  }, [currentUserEmail]);
 
   const formatDate = (isoString?: string) => {
     if (!isoString) return 'Recent';
@@ -120,27 +97,6 @@ export const Orders: React.FC = () => {
       }).format(date);
     } catch {
       return isoString;
-    }
-  };
-
-  const handleRemoveOrder = (orderIdToRemove: string) => {
-    setOrders((prev) => prev.filter((o) => o.orderId !== orderIdToRemove));
-    try {
-      const rawList = localStorage.getItem('zentra_orders_list_v1');
-      const loaded: Order[] = rawList ? JSON.parse(rawList) : [];
-      const updated = loaded.filter((o) => o.orderId !== orderIdToRemove);
-      localStorage.setItem('zentra_orders_list_v1', JSON.stringify(updated));
-    } catch (err) {
-      console.warn('Error removing order from storage:', err);
-    }
-  };
-
-  const handleClearAllLocalOrders = () => {
-    setOrders([]);
-    try {
-      localStorage.removeItem('zentra_orders_list_v1');
-    } catch (err) {
-      console.warn('Error clearing orders from storage:', err);
     }
   };
 
@@ -211,15 +167,6 @@ export const Orders: React.FC = () => {
             Purchases for <span className="font-semibold text-slate-800">{currentUserEmail}</span>
           </p>
         </div>
-        {orders.length > 0 && (
-          <button
-            type="button"
-            onClick={handleClearAllLocalOrders}
-            className="text-[11px] font-semibold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer self-start sm:self-auto"
-          >
-            Clear local test orders
-          </button>
-        )}
       </div>
 
       {loading ? (
@@ -295,18 +242,10 @@ export const Orders: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div>
                   <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
                     Confirmed
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveOrder(order.orderId)}
-                    title="Remove this order from list"
-                    className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
 

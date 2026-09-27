@@ -262,19 +262,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     try {
-      // 1. Instantly set lastOrder and persist locally
+      // 1. Instantly set lastOrder for the immediate thank-you confirmation screen
       setLastOrder(newOrder);
 
       try {
         localStorage.setItem(LAST_ORDER_STORAGE_KEY, JSON.stringify(newOrder));
-        const existingOrdersRaw = localStorage.getItem('zentra_orders_list_v1');
-        const existingOrders: Order[] = existingOrdersRaw ? JSON.parse(existingOrdersRaw) : [];
-        localStorage.setItem('zentra_orders_list_v1', JSON.stringify([newOrder, ...existingOrders]));
       } catch (e) {
-        console.error('Failed to save confirmed order locally:', e);
+        console.error('Failed to save confirmation order locally:', e);
       }
 
-      // 2. Dispatch to Google Sheets webhook in background
+      // 2. Dispatch real order to Google Sheets database in background
       syncOrderToGoogleSheets(payload);
 
       // 3. Clear cart
