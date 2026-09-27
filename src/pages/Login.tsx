@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Mail,
@@ -22,16 +22,18 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbycdfssgJItaZiE
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectTo = searchParams.get('redirect') || '/';
   const cartContext = useCart();
   const showToast = cartContext.addToast || cartContext.showToast;
 
-  // Redirect authenticated users immediately to the home page
+  // Redirect authenticated users immediately to destination
   useEffect(() => {
     const userEmail = localStorage.getItem('zentra_user_email');
     if (userEmail) {
-      navigate('/', { replace: true });
+      navigate(redirectTo, { replace: true });
     }
-  }, [navigate]);
+  }, [navigate, redirectTo]);
 
   // View state: 'signin' | 'signup' | 'forgot'
   const [view, setView] = useState<'signin' | 'signup' | 'forgot'>('signin');
@@ -403,7 +405,7 @@ export const Login: React.FC = () => {
         setSuccessMsg('Account created successfully! Redirecting...');
         setTimeout(() => {
           setLoading(false);
-          navigate('/', { replace: true });
+          navigate(redirectTo, { replace: true });
         }, 500);
       } catch (err) {
         console.warn('Apps Script register network issue, checking local session:', err);
@@ -420,7 +422,7 @@ export const Login: React.FC = () => {
         setSuccessMsg('Account created successfully! Redirecting...');
         setTimeout(() => {
           setLoading(false);
-          navigate('/', { replace: true });
+          navigate(redirectTo, { replace: true });
         }, 500);
       }
     } else {
@@ -441,7 +443,7 @@ export const Login: React.FC = () => {
           setSuccessMsg('Welcome back! Redirecting...');
           setTimeout(() => {
             setLoading(false);
-            navigate('/', { replace: true });
+            navigate(redirectTo, { replace: true });
           }, 500);
           return;
         }
@@ -491,7 +493,7 @@ export const Login: React.FC = () => {
         setSuccessMsg('Welcome back! Redirecting...');
         setTimeout(() => {
           setLoading(false);
-          navigate('/', { replace: true });
+          navigate(redirectTo, { replace: true });
         }, 500);
       } catch (err) {
         console.warn('Network issue during login check, fallback to local registry:', err);
@@ -515,7 +517,7 @@ export const Login: React.FC = () => {
         setSuccessMsg('Welcome back! Redirecting...');
         setTimeout(() => {
           setLoading(false);
-          navigate('/', { replace: true });
+          navigate(redirectTo, { replace: true });
         }, 500);
       }
     }
@@ -525,8 +527,19 @@ export const Login: React.FC = () => {
     <div id="login-page" className="min-h-[85vh] flex flex-col items-center justify-center px-4 py-12">
       <div className="w-full max-w-md space-y-4">
         <div className="flex justify-start">
-          <BackButton label="Back to Shop" onClick={() => navigate('/shop')} className="mb-0" />
+          <BackButton
+            label={redirectTo === '/checkout' ? 'Back to Cart' : 'Back to Shop'}
+            onClick={() => navigate(redirectTo === '/checkout' ? '/cart' : '/shop')}
+            className="mb-0"
+          />
         </div>
+
+        {redirectTo === '/checkout' && (
+          <div className="p-3.5 bg-blue-50 border border-blue-200/80 rounded-2xl flex items-center gap-2.5 text-xs text-blue-900 font-semibold shadow-xs">
+            <LogIn className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>Please sign in or create an account to proceed to checkout</span>
+          </div>
+        )}
 
         <motion.div
           initial={{ opacity: 0, y: 15 }}

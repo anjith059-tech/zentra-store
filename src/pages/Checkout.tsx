@@ -12,12 +12,10 @@ import {
   CheckCircle2,
   Search,
   ChevronDown,
-  LogIn,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { BackButton } from '../components/BackButton';
 import { OrderCustomerDetails } from '../types';
-import { AuthModal } from '../components/AuthModal';
 
 const COUNTRIES = [
   'United States',
@@ -250,21 +248,15 @@ export const Checkout: React.FC = () => {
   const [apt, setApt] = useState('');
   const isOrderSubmitted = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(() => localStorage.getItem('zentra_user_email'));
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(() => !localStorage.getItem('zentra_user_email'));
 
   useEffect(() => {
-    const handleAuthChange = () => {
-      const email = localStorage.getItem('zentra_user_email');
-      setCurrentUserEmail(email);
-      if (email) {
-        setForm((prev) => ({ ...prev, email }));
-        setShowAuthModal(false);
-      }
-    };
-    window.addEventListener('zentra_auth_change', handleAuthChange);
-    return () => window.removeEventListener('zentra_auth_change', handleAuthChange);
-  }, []);
+    const email = localStorage.getItem('zentra_user_email');
+    if (!email) {
+      navigate('/login?redirect=/checkout', { replace: true });
+    } else {
+      setForm((prev) => ({ ...prev, email }));
+    }
+  }, [navigate]);
 
   const [razorpayKeyId, setRazorpayKeyId] = useState<string>(() => {
     return (
@@ -414,9 +406,9 @@ export const Checkout: React.FC = () => {
   const handleOpenPayment = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!currentUserEmail) {
-      setShowAuthModal(true);
-      showToast('Please sign in or create an account to proceed with checkout', 'info');
+    const email = localStorage.getItem('zentra_user_email');
+    if (!email) {
+      navigate('/login?redirect=/checkout');
       return;
     }
 
@@ -552,22 +544,6 @@ export const Checkout: React.FC = () => {
       </div>
 
       <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Checkout</h1>
-
-      {!currentUserEmail && (
-        <div className="p-3.5 bg-blue-50 border border-blue-200/80 rounded-2xl flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2 text-blue-900 font-semibold">
-            <LogIn className="w-4 h-4 text-blue-600 shrink-0" />
-            <span>Sign in or register to complete your order</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowAuthModal(true)}
-            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-xs text-[11px] cursor-pointer"
-          >
-            Sign In / Register
-          </button>
-        </div>
-      )}
 
       <form onSubmit={handleOpenPayment} className="space-y-4">
         <motion.div
@@ -916,18 +892,6 @@ export const Checkout: React.FC = () => {
           </button>
         </motion.div>
       </form>
-
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-        onSuccess={(email) => {
-          setCurrentUserEmail(email);
-          setForm((prev) => ({ ...prev, email }));
-          setShowAuthModal(false);
-        }}
-        title="Sign In to Checkout"
-        subtitle="Please sign in or create an account to proceed to payment."
-      />
     </div>
   );
 };
