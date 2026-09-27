@@ -14,6 +14,7 @@ import {
   ChevronDown,
   X,
   Key,
+  AlertCircle,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { BackButton } from '../components/BackButton';
@@ -250,6 +251,15 @@ export const Checkout: React.FC = () => {
   const [apt, setApt] = useState('');
   const isOrderSubmitted = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [paymentCurrency, setPaymentCurrency] = useState<'USD' | 'INR'>(() => {
+    return localStorage.getItem('zentra_currency') === 'INR' ? 'INR' : 'USD';
+  });
+
+  const inrRate = 85;
+  const displayGrandTotalINR = Math.round(grandTotal * inrRate);
+  const activePaymentAmount = paymentCurrency === 'INR' ? displayGrandTotalINR : grandTotal;
+  const activeRazorpayAmount = Math.round(activePaymentAmount * 100);
+
   const [razorpayKeyId, setRazorpayKeyId] = useState<string>(() => {
     return (
       localStorage.getItem('zentra_razorpay_key_id') ||
@@ -261,6 +271,13 @@ export const Checkout: React.FC = () => {
   const [keyInput, setKeyInput] = useState('');
   const isLiveRazorpayConfigured = razorpayKeyId.startsWith('rzp_live');
 
+  // Auto-switch currency to INR if country is India and not manually changed
+  useEffect(() => {
+    if (country.toLowerCase() === 'india' && !localStorage.getItem('zentra_currency')) {
+      setPaymentCurrency('INR');
+    }
+  }, [country]);
+
   // Fetch Razorpay configuration from server on mount if available
   useEffect(() => {
     fetch('/api/payment/razorpay-config')
@@ -269,8 +286,12 @@ export const Checkout: React.FC = () => {
         return ct.includes('application/json') ? res.json() : null;
       })
       .then((data) => {
-        if (data?.keyId && !localStorage.getItem('zentra_razorpay_key_id')) {
-          setRazorpayKeyId(data.keyId);
+        if (data?.keyId) {
+          // Never overwrite if user already configured a live key locally
+          const localKey = localStorage.getItem('zentra_razorpay_key_id');
+          if (!localKey || !localKey.startsWith('rzp_live_')) {
+            setRazorpayKeyId(data.keyId);
+          }
         }
       })
       .catch((err) => {
@@ -383,7 +404,7 @@ export const Checkout: React.FC = () => {
         addressLine1: form.street,
         addressLine2: apt,
         zipCode: form.zip,
-      }, `Razorpay Payment (${paymentId})`);
+      }, `Razorpay ${paymentCurrency} Payment (${paymentId})`);
       
       showToast('Payment successful! Your order has been placed.', 'success');
       setIsProcessing(false);
@@ -426,9 +447,10 @@ export const Checkout: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
-            amount: grandTotal,
-            currency: 'USD',
+            amount: activePaymentAmount,
+            currency: paymentCurrency,
             receipt: `rcpt_${Date.now()}`,
+            keyId: activeKey,
             notes: {
               customer_name: form.fullName,
               customer_email: form.email,
@@ -443,8 +465,11 @@ export const Checkout: React.FC = () => {
           const contentType = orderRes.headers.get('content-type') || '';
           if (contentType.includes('application/json')) {
             const orderData = await orderRes.json();
+            // NEVER downgrade if client already has a live key configured
             if (orderData?.keyId) {
-              activeKey = orderData.keyId;
+              if (orderData.keyId.startsWith('rzp_live_') || !activeKey.startsWith('rzp_live_')) {
+                activeKey = orderData.keyId;
+              }
             }
             if (orderData?.orderId && !orderData.mock) {
               serverOrderId = orderData.orderId;
@@ -458,10 +483,10 @@ export const Checkout: React.FC = () => {
       // Configure official Razorpay Standard Checkout
       const options: any = {
         key: activeKey,
-        amount: Math.round(grandTotal * 100),
-        currency: 'USD',
+        amount: activeRazorpayAmount,
+        currency: paymentCurrency,
         name: 'ZENTRA',
-        description: 'Order Payment',
+        description: `Order Payment (${paymentCurrency === 'INR' ? `₹${displayGrandTotalINR.toLocaleString('en-IN')}` : `$${grandTotal.toFixed(2)}`})`,
         image: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=128&q=80',
         prefill: {
           name: form.fullName,
@@ -470,6 +495,7 @@ export const Checkout: React.FC = () => {
         },
         notes: {
           address: `${form.street}, ${form.city}, ${form.state} ${form.zip}, ${country}`,
+          currency: paymentCurrency,
         },
         theme: {
           color: '#0f172a',
@@ -829,28 +855,30 @@ export const Checkout: React.FC = () => {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-black text-white tracking-wide uppercase">Payment Method</h3>
+                  <h3 className="text-xs font-black text-white tracking-wide uppercase">Payment Gateway</h3>
                   {isLiveRazorpayConfigured ? (
-                    <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-                      Live
+                    <span className="text-[9px] font-black uppercase tracking-wider text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Live Mode
                     </span>
                   ) : (
-                    <span className="text-[9px] font-semibold text-amber-400 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                      Gateway Ready
+                    <span className="text-[9px] font-bold text-amber-300 bg-amber-950/80 border border-amber-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      Test Mode
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <p className="text-[11px] text-slate-400 font-medium">Official Razorpay Checkout</p>
+                  <p className="text-[11px] text-slate-400 font-medium">Razorpay Official Integration</p>
                   <button
                     type="button"
                     onClick={() => {
-                      setKeyInput(razorpayKeyId);
+                      setKeyInput(razorpayKeyId.startsWith('rzp_test') ? '' : razorpayKeyId);
                       setShowKeyModal(true);
                     }}
                     className="text-[10px] text-blue-400 hover:text-blue-300 underline font-semibold cursor-pointer"
                   >
-                    Gateway Settings
+                    API Keys
                   </button>
                 </div>
               </div>
@@ -861,10 +889,85 @@ export const Checkout: React.FC = () => {
             </span>
           </div>
 
+          {/* Test Mode Notification / Switch to Live Notice */}
+          {!isLiveRazorpayConfigured ? (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl relative z-10 space-y-1.5">
+              <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>Running in Razorpay Test / Demo Mode</span>
+              </div>
+              <p className="text-[11px] text-amber-200/80 leading-relaxed pl-6">
+                Transactions currently simulate payments without charging real money. To accept real payments from customer bank cards and UPI, connect your <span className="font-mono text-white">rzp_live_...</span> key.
+              </p>
+              <div className="pl-6 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKeyInput('');
+                    setShowKeyModal(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-slate-900 rounded-lg text-[10px] font-black transition-colors shadow-xs"
+                >
+                  <Key className="w-3 h-3" />
+                  Connect Live Key (rzp_live_...)
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl relative z-10 flex items-center justify-between gap-2 text-xs text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-bold text-[11px]">Real Live Payments Enabled ({razorpayKeyId.slice(0, 14)}...)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setKeyInput(razorpayKeyId);
+                  setShowKeyModal(true);
+                }}
+                className="text-[10px] text-emerald-400 hover:text-emerald-300 underline font-semibold"
+              >
+                Change Key
+              </button>
+            </div>
+          )}
+
+          {/* Currency Toggle */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-800/60 border border-slate-700/60 rounded-xl text-xs relative z-10">
+            <div>
+              <span className="text-slate-300 font-semibold block text-[11px]">Payment Currency:</span>
+              <span className="text-slate-400 text-[10px]">
+                {paymentCurrency === 'INR' ? 'Enables UPI (GPay/PhonePe), RuPay & Netbanking' : 'International Credit / Debit Cards'}
+              </span>
+            </div>
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-700 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentCurrency('USD');
+                  localStorage.setItem('zentra_currency', 'USD');
+                }}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${paymentCurrency === 'USD' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'}`}
+              >
+                USD ($)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentCurrency('INR');
+                  localStorage.setItem('zentra_currency', 'INR');
+                }}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${paymentCurrency === 'INR' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'}`}
+              >
+                INR (₹)
+              </button>
+            </div>
+          </div>
+
           <p className="text-xs text-slate-400 leading-relaxed relative z-10">
-            {country.toLowerCase() === 'india'
-              ? 'Clicking below opens the official Razorpay modal to pay securely with UPI, Credit/Debit Cards, Netbanking, or Wallets.'
-              : 'Clicking below opens the official Razorpay modal to pay securely with International Credit/Debit Cards.'}
+            {paymentCurrency === 'INR'
+              ? 'Clicking below opens the official Razorpay window to pay securely via UPI (Google Pay, PhonePe, Paytm), Debit/Credit Cards, or Netbanking.'
+              : 'Clicking below opens the official Razorpay window to pay securely with International Credit/Debit Cards.'}
           </p>
 
           <button
@@ -883,7 +986,7 @@ export const Checkout: React.FC = () => {
               </span>
             </div>
             <span className="font-black text-sm tracking-tight text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg group-hover:bg-slate-200 transition-colors duration-300">
-              ${grandTotal.toFixed(2)}
+              {paymentCurrency === 'INR' ? `₹${displayGrandTotalINR.toLocaleString('en-IN')}` : `$${grandTotal.toFixed(2)}`}
             </span>
           </button>
         </motion.div>
@@ -892,50 +995,58 @@ export const Checkout: React.FC = () => {
       {/* Gateway Settings Modal */}
       {showKeyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
-          <div className="w-full max-w-[380px] bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 p-6 space-y-4">
+          <div className="w-full max-w-[420px] bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white">
-                  <Key className="w-4 h-4" />
+                <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white">
+                  <Key className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="font-extrabold text-sm text-slate-900">Razorpay Key Configuration</h4>
-                  <p className="text-[11px] text-slate-500">Merchant Gateway Credentials</p>
+                  <h4 className="font-extrabold text-sm text-slate-900">Razorpay API Credentials</h4>
+                  <p className="text-[11px] text-slate-500">Connect Live or Test Payments</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowKeyModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Paste your Razorpay <span className="font-semibold text-slate-900">Key ID</span> from your{' '}
-              <a
-                href="https://dashboard.razorpay.com/app/keys"
-                target="_blank"
-                rel="noreferrer"
-                className="text-blue-600 underline font-semibold"
-              >
-                Razorpay Dashboard
-              </a>{' '}
-              to start collecting live customer payments:
-            </p>
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-2 text-xs">
+              <p className="font-bold text-slate-800">How to get your Live Key:</p>
+              <ol className="list-decimal pl-4 space-y-1 text-slate-600 text-[11px] leading-relaxed">
+                <li>Log in to your <a href="https://dashboard.razorpay.com/app/keys" target="_blank" rel="noreferrer" className="text-blue-600 font-semibold underline">Razorpay Dashboard</a>.</li>
+                <li>In the top bar, switch the toggle from <b>Test Mode</b> to <b>Live Mode</b>.</li>
+                <li>Go to <b>Account & Settings &gt; API Keys</b> and generate/copy your <b>Key ID</b>.</li>
+                <li>Your Live Key ID starts with <code className="bg-slate-200 px-1 py-0.5 rounded font-mono text-[10px] text-slate-900 font-bold">rzp_live_...</code></li>
+              </ol>
+            </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-700">Razorpay Key ID</label>
+              <div className="flex justify-between items-baseline">
+                <label className="text-[11px] font-bold text-slate-700">Razorpay Key ID</label>
+                {keyInput.startsWith('rzp_live_') ? (
+                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    ✓ Valid Live Key format
+                  </span>
+                ) : keyInput.startsWith('rzp_test_') ? (
+                  <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                    ⚠️ Test Mode Key
+                  </span>
+                ) : null}
+              </div>
               <input
                 type="text"
-                placeholder="rzp_live_... or rzp_test_..."
+                placeholder="rzp_live_xxxxxxxxxxxxxx"
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value.trim())}
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:bg-white focus:border-blue-600 focus:outline-none transition-all"
               />
-              <p className="text-[10px] text-slate-400 truncate">
-                Active Key: {razorpayKeyId}
+              <p className="text-[10px] text-slate-500 truncate">
+                Current active: <span className="font-mono">{razorpayKeyId}</span>
               </p>
             </div>
 
@@ -943,23 +1054,29 @@ export const Checkout: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  if (keyInput) {
-                    localStorage.setItem('zentra_razorpay_key_id', keyInput);
-                    setRazorpayKeyId(keyInput);
-                    showToast('Razorpay Key saved successfully!', 'success');
+                  if (!keyInput) {
+                    showToast('Please enter your Razorpay Key ID', 'error');
+                    return;
+                  }
+                  localStorage.setItem('zentra_razorpay_key_id', keyInput);
+                  setRazorpayKeyId(keyInput);
+                  if (keyInput.startsWith('rzp_live_')) {
+                    showToast('Live Mode activated! Real payments enabled.', 'success');
+                  } else {
+                    showToast('Test Key saved. Running in Test Mode.', 'success');
                   }
                   setShowKeyModal(false);
                 }}
-                className="flex-1 py-2.5 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all"
+                className="flex-1 py-2.5 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md"
               >
-                Save & Apply
+                Save & Activate Key
               </button>
               <button
                 type="button"
                 onClick={() => setShowKeyModal(false)}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer"
               >
-                Close
+                Cancel
               </button>
             </div>
           </div>

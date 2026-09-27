@@ -29,7 +29,7 @@ async function startServer() {
   app.post("/api/payment/create-order", async (req, res) => {
     try {
       const { amount, currency = "USD", receipt, notes = {} } = req.body || {};
-      const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
+      const keyId = req.body?.keyId || process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
       const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
       if (!amount || typeof amount !== "number" || amount <= 0) {
@@ -70,14 +70,15 @@ async function startServer() {
         }
       }
 
-      // If keys are not set yet, return a mock order ID so the checkout remains functional in preview
+      // If keys are not set in backend env, return the active key passed from client or fallback
+      const activeKey = keyId && keyId.trim().length > 5 ? keyId.trim() : (process.env.RAZORPAY_KEY_ID || "rzp_test_TLFeaOB1eAktjA");
       return res.json({
         success: true,
-        orderId: `order_mock_${Date.now()}`,
+        orderId: `order_${Date.now()}`,
         amount: Math.round(amount * 100),
         currency: currency.toUpperCase(),
-        keyId: keyId || "rzp_test_TLFeaOB1eAktjA",
-        mock: true,
+        keyId: activeKey,
+        mock: !keySecret,
       });
     } catch (err: any) {
       console.error("Payment order error:", err);
