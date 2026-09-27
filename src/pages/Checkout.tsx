@@ -261,10 +261,15 @@ export const Checkout: React.FC = () => {
   const activeRazorpayAmount = Math.round(activePaymentAmount * 100);
 
   const [razorpayKeyId, setRazorpayKeyId] = useState<string>(() => {
+    const saved = localStorage.getItem('zentra_razorpay_key_id');
+    if (saved && !saved.startsWith('rzp_test_')) {
+      return saved;
+    }
+    // Update local storage to ensure live key is preserved
+    localStorage.setItem('zentra_razorpay_key_id', 'rzp_live_TZZlF4VIFX065X');
     return (
-      localStorage.getItem('zentra_razorpay_key_id') ||
       (import.meta as any).env?.VITE_RAZORPAY_KEY_ID ||
-      'rzp_test_TLFeaOB1eAktjA'
+      'rzp_live_TZZlF4VIFX065X'
     );
   });
   const [showKeyModal, setShowKeyModal] = useState(false);

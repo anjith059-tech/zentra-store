@@ -71,7 +71,7 @@ async function startServer() {
       }
 
       // If keys are not set in backend env, return the active key passed from client or fallback
-      const activeKey = keyId && keyId.trim().length > 5 ? keyId.trim() : (process.env.RAZORPAY_KEY_ID || "rzp_test_TLFeaOB1eAktjA");
+      const activeKey = keyId && keyId.trim().length > 5 ? keyId.trim() : (process.env.RAZORPAY_KEY_ID || "rzp_live_TZZlF4VIFX065X");
       return res.json({
         success: true,
         orderId: `order_${Date.now()}`,
