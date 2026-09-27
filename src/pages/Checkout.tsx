@@ -415,7 +415,12 @@ export const Checkout: React.FC = () => {
       let activeKey = razorpayKeyId;
       let serverOrderId: string | undefined = undefined;
 
-      const isIndianCustomer = country.toLowerCase() === 'india' || countryCode.trim() === '+91';
+      const cleanPhone = form.phone.trim().replace(/\D/g, '');
+      const isIndianCustomer =
+        country.toLowerCase() === 'india' ||
+        countryCode.trim() === '+91' ||
+        cleanPhone.startsWith('91') ||
+        (/^[6-9]\d{9}$/.test(cleanPhone));
       const orderCurrency = isIndianCustomer ? 'INR' : 'USD';
       const orderAmount = isIndianCustomer ? Math.round(grandTotal * 85) : grandTotal;
       const amountInSmallestUnit = Math.round(orderAmount * 100);
