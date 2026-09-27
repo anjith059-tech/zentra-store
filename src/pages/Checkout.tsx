@@ -222,15 +222,15 @@ export const Checkout: React.FC = () => {
   const { cart, subtotal, deliveryCharge, discountAmount, grandTotal, placeOrder, clearCart, showToast } =
     useCart();
 
-  const [form, setForm] = useState<OrderCustomerDetails>({
+  const [form, setForm] = useState<OrderCustomerDetails>(() => ({
     fullName: '',
-    email: '',
+    email: localStorage.getItem('zentra_user_email') || '',
     phone: '',
     street: '',
     city: '',
     state: '',
     zip: '',
-  });
+  }));
 
   const [country, setCountry] = useState('United States');
   const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
@@ -364,6 +364,14 @@ export const Checkout: React.FC = () => {
     const derivedFirstName = firstName || fullNameParts[0] || '';
     const derivedLastName = lastName || fullNameParts.slice(1).join(' ') || '';
     const fullPhoneNumber = `${countryCode.trim()} ${form.phone.trim()}`;
+
+    if (form.email) {
+      try {
+        localStorage.setItem('zentra_user_email', form.email.trim());
+      } catch (e) {
+        console.warn('Could not save user email to local storage:', e);
+      }
+    }
 
     try {
       await placeOrder({

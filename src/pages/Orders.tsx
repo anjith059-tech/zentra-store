@@ -13,30 +13,64 @@ export const Orders: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    // 1. Immediately load local orders so user sees their purchases instantly without waiting
+    const loadLocalOrders = (): Order[] => {
+      try {
+        const rawList = localStorage.getItem('zentra_orders_list_v1');
+        const loaded: Order[] = rawList ? JSON.parse(rawList) : [];
+        return Array.isArray(loaded) ? loaded : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const initialLocalOrders = loadLocalOrders();
+    if (initialLocalOrders.length > 0) {
+      setOrders(initialLocalOrders);
+      setLoading(false);
+    }
+
     const fetchOrders = async () => {
       const email = localStorage.getItem('zentra_user_email');
       
       if (!email) {
-        setOrders([]);
+        setOrders(loadLocalOrders());
         setLoading(false);
         return;
       }
 
       try {
-        const response = await fetch(`${WEBHOOK_URL}?email=${encodeURIComponent(email)}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const response = await fetch(`${WEBHOOK_URL}?email=${encodeURIComponent(email)}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
         const data = await response.json();
         
-        if (data.status === 'success' && data.orders) {
-          setOrders(data.orders);
+        if (data.status === 'success' && Array.isArray(data.orders) && data.orders.length > 0) {
+          const serverOrders: Order[] = data.orders;
+          const localOrders = loadLocalOrders();
+          
+          // Merge and deduplicate by orderId
+          const orderMap = new Map<string, Order>();
+          serverOrders.forEach((o) => {
+            if (o.orderId) orderMap.set(o.orderId, o);
+          });
+          localOrders.forEach((o) => {
+            if (o.orderId && !orderMap.has(o.orderId)) {
+              orderMap.set(o.orderId, o);
+            }
+          });
+
+          setOrders(Array.from(orderMap.values()));
         } else {
-          setOrders([]);
+          setOrders(loadLocalOrders());
         }
       } catch (e) {
-        console.error('Failed to load orders from server:', e);
-        // Fallback to local storage if network fails
-        const rawList = localStorage.getItem('zentra_orders_list_v1');
-        const loadedOrders: Order[] = rawList ? JSON.parse(rawList) : [];
-        setOrders(Array.isArray(loadedOrders) ? loadedOrders : []);
+        console.warn('Network sync notice for orders:', e);
+        setOrders(loadLocalOrders());
       } finally {
         setLoading(false);
       }

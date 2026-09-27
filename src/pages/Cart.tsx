@@ -140,14 +140,7 @@ export const Cart: React.FC = () => {
           <span className="text-xl font-black text-slate-900">${grandTotal.toFixed(2)}</span>
         </div>
         <button
-          onClick={() => {
-            const isLoggedIn = localStorage.getItem('zentra_user_email');
-            if (isLoggedIn) {
-              navigate('/checkout');
-            } else {
-              navigate('/login');
-            }
-          }}
+          onClick={() => navigate('/checkout')}
           className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black text-white py-3.5 rounded-2xl text-xs font-bold shadow-md active:scale-98 transition-all mt-4"
         >
           <span>Proceed to Checkout</span>
