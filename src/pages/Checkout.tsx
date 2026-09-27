@@ -367,11 +367,15 @@ export const Checkout: React.FC = () => {
 
     setIsProcessing(true);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
     try {
-      // 1. Create order on the server
+      // 1. Create order on the server with 6s timeout
       const orderRes = await fetch('/api/payment/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           amount: grandTotal,
           currency: 'USD',
@@ -383,6 +387,8 @@ export const Checkout: React.FC = () => {
           },
         }),
       });
+
+      clearTimeout(timeoutId);
 
       const orderData = await orderRes.json();
       if (!orderRes.ok || !orderData.orderId) {
@@ -436,6 +442,7 @@ export const Checkout: React.FC = () => {
       // Fallback modal if SDK is blocked or preview sandbox
       setShowRazorpayModal(true);
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Payment launch error:', err);
       showToast(err?.message || 'Could not initiate payment. Falling back to checkout drawer.', 'error');
       setShowRazorpayModal(true);
