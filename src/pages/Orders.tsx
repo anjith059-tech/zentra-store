@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Package, ShoppingBag, Truck, MapPin, Calendar, ArrowRight, CreditCard } from 'lucide-react';
+import { Package, ShoppingBag, MapPin, Calendar, ArrowRight, CreditCard, Lock, LogIn, Trash2 } from 'lucide-react';
 import { Order } from '../types';
 import { BackButton } from '../components/BackButton';
 
@@ -9,40 +9,67 @@ const WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbzFjtjdM_7lssQ0lJnT
 
 export const Orders: React.FC = () => {
   const navigate = useNavigate();
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(() => localStorage.getItem('zentra_user_email'));
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // Filter local orders strictly by user email
+  const loadLocalOrdersForUser = useCallback((userEmail: string | null): Order[] => {
+    if (!userEmail) return [];
+    try {
+      const rawList = localStorage.getItem('zentra_orders_list_v1');
+      const loaded: Order[] = rawList ? JSON.parse(rawList) : [];
+      if (!Array.isArray(loaded)) return [];
+
+      const cleanUserEmail = userEmail.trim().toLowerCase();
+      return loaded.filter((order) => {
+        const orderEmail = order.customer?.email || (order as any).email;
+        return orderEmail && orderEmail.trim().toLowerCase() === cleanUserEmail;
+      });
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Listen to auth state changes (login / logout)
   useEffect(() => {
-    // 1. Immediately load local orders so user sees their purchases instantly without waiting
-    const loadLocalOrders = (): Order[] => {
-      try {
-        const rawList = localStorage.getItem('zentra_orders_list_v1');
-        const loaded: Order[] = rawList ? JSON.parse(rawList) : [];
-        return Array.isArray(loaded) ? loaded : [];
-      } catch {
-        return [];
+    const handleAuthChange = () => {
+      const email = localStorage.getItem('zentra_user_email');
+      setCurrentUserEmail(email);
+      if (!email) {
+        setOrders([]);
+        setLoading(false);
       }
     };
 
-    const initialLocalOrders = loadLocalOrders();
+    window.addEventListener('zentra_auth_change', handleAuthChange);
+    window.addEventListener('storage', handleAuthChange);
+    return () => {
+      window.removeEventListener('zentra_auth_change', handleAuthChange);
+      window.removeEventListener('storage', handleAuthChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserEmail) {
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
+
+    const initialLocalOrders = loadLocalOrdersForUser(currentUserEmail);
     if (initialLocalOrders.length > 0) {
       setOrders(initialLocalOrders);
       setLoading(false);
+    } else {
+      setLoading(true);
     }
 
     const fetchOrders = async () => {
-      const email = localStorage.getItem('zentra_user_email');
-      
-      if (!email) {
-        setOrders(loadLocalOrders());
-        setLoading(false);
-        return;
-      }
-
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 4000);
-        const response = await fetch(`${WEBHOOK_URL}?email=${encodeURIComponent(email)}`, {
+        const response = await fetch(`${WEBHOOK_URL}?email=${encodeURIComponent(currentUserEmail)}`, {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
@@ -51,7 +78,7 @@ export const Orders: React.FC = () => {
         
         if (data.status === 'success' && Array.isArray(data.orders) && data.orders.length > 0) {
           const serverOrders: Order[] = data.orders;
-          const localOrders = loadLocalOrders();
+          const localOrders = loadLocalOrdersForUser(currentUserEmail);
           
           // Merge and deduplicate by orderId
           const orderMap = new Map<string, Order>();
@@ -66,18 +93,18 @@ export const Orders: React.FC = () => {
 
           setOrders(Array.from(orderMap.values()));
         } else {
-          setOrders(loadLocalOrders());
+          setOrders(loadLocalOrdersForUser(currentUserEmail));
         }
       } catch (e) {
         console.warn('Network sync notice for orders:', e);
-        setOrders(loadLocalOrders());
+        setOrders(loadLocalOrdersForUser(currentUserEmail));
       } finally {
         setLoading(false);
       }
     };
 
     fetchOrders();
-  }, []);
+  }, [currentUserEmail, loadLocalOrdersForUser]);
 
   const formatDate = (isoString?: string) => {
     if (!isoString) return 'Recent';
@@ -96,6 +123,72 @@ export const Orders: React.FC = () => {
     }
   };
 
+  const handleRemoveOrder = (orderIdToRemove: string) => {
+    setOrders((prev) => prev.filter((o) => o.orderId !== orderIdToRemove));
+    try {
+      const rawList = localStorage.getItem('zentra_orders_list_v1');
+      const loaded: Order[] = rawList ? JSON.parse(rawList) : [];
+      const updated = loaded.filter((o) => o.orderId !== orderIdToRemove);
+      localStorage.setItem('zentra_orders_list_v1', JSON.stringify(updated));
+    } catch (err) {
+      console.warn('Error removing order from storage:', err);
+    }
+  };
+
+  const handleClearAllLocalOrders = () => {
+    setOrders([]);
+    try {
+      localStorage.removeItem('zentra_orders_list_v1');
+    } catch (err) {
+      console.warn('Error clearing orders from storage:', err);
+    }
+  };
+
+  // If user is not logged in, show lock/signin gate - no orders visible!
+  if (!currentUserEmail) {
+    return (
+      <div id="orders-page" className="max-w-4xl mx-auto px-4 py-8 space-y-6 pb-24">
+        <div className="flex items-center justify-between">
+          <BackButton label="Back to Shop" onClick={() => navigate('/shop')} />
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+          className="w-full bg-white rounded-3xl border border-slate-100 p-8 sm:p-14 text-center space-y-6 shadow-xl shadow-slate-200/50 my-8"
+        >
+          <div className="w-20 h-20 rounded-3xl bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-10 h-10 text-slate-700 stroke-[1.5]" />
+          </div>
+          <div className="space-y-2 max-w-md mx-auto">
+            <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+              Sign In to View Orders
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 font-normal leading-relaxed">
+              Order history and tracking details are protected. Please sign in or register to access your purchases.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button
+              onClick={() => navigate('/login?redirect=/orders')}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-black active:scale-98 text-white px-8 py-3.5 rounded-2xl text-xs sm:text-sm font-bold shadow-md transition-all duration-200 cursor-pointer"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>Sign In / Register</span>
+            </button>
+            <Link
+              to="/shop"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 px-6 py-3.5 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200"
+            >
+              <span>Explore Products</span>
+            </Link>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div id="orders-page" className="max-w-4xl mx-auto px-4 py-8 space-y-6 pb-24">
       <div className="flex items-center justify-between">
@@ -109,13 +202,24 @@ export const Orders: React.FC = () => {
         </Link>
       </div>
 
-      <div className="space-y-1">
-        <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-          My Orders
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-500 max-w-lg">
-          View and manage your appliance purchases with ease.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 pb-1">
+        <div className="space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+            My Orders
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 max-w-lg">
+            Purchases for <span className="font-semibold text-slate-800">{currentUserEmail}</span>
+          </p>
+        </div>
+        {orders.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClearAllLocalOrders}
+            className="text-[11px] font-semibold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer self-start sm:self-auto"
+          >
+            Clear local test orders
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -191,10 +295,18 @@ export const Orders: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="flex items-center gap-2">
                   <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
                     Confirmed
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveOrder(order.orderId)}
+                    title="Remove this order from list"
+                    className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
 
